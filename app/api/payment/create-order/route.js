@@ -45,8 +45,16 @@ export async function POST(req) {
     }
 
     // Guard: the page showed one total, the server computed another.
+    // Exact comparison (whole rupees) — a tolerance would hide real
+    // shipping mismatches on small orders.
     if (expectedTotal !== undefined && expectedTotal !== null) {
-      if (Math.abs(total - Number(expectedTotal)) > 1) {
+      if (Math.round(total) !== Math.round(Number(expectedTotal))) {
+        console.warn('Total mismatch', {
+          server: total,
+          expected: expectedTotal,
+          shippingFee,
+          state: shippingAddress?.state
+        });
         return NextResponse.json(
           { error: 'Prices or shipping changed. Please review your total and try again.' },
           { status: 409 }

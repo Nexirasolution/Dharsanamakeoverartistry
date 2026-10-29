@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Script from 'next/script';
 import toast from 'react-hot-toast';
@@ -67,6 +67,10 @@ export default function CheckoutPage() {
   const [freeShippingAbove, setFreeShippingAbove] = useState(null);
   const [shippingLoading, setShippingLoading] = useState(false);
 
+  // Guards against out-of-order responses: only the latest request may
+  // update shipping state.
+  const shippingReq = useRef(0);
+
   const discountedSubtotal = subtotal - discount;
   const total = shipping !== null ? Math.round(discountedSubtotal + shipping) : null;
 
@@ -75,6 +79,10 @@ export default function CheckoutPage() {
   const totalQty = items.reduce((sum, i) => sum + (i.qty || 0), 0);
 
   const fetchShipping = useCallback(async () => {
+    const id = ++shippingReq.current;
+    // Clear the old value so "Place Order" stays disabled until the
+    // fresh shipping for the current state/cart arrives.
+    setShipping(null);
     setShippingLoading(true);
     try {
       const res = await fetch('/api/admin/settings', {
@@ -95,6 +103,7 @@ export default function CheckoutPage() {
         })
       });
       const data = await res.json();
+      if (id !== shippingReq.current) return; // a newer request superseded this one
       if (res.ok) {
         setShipping(data.shippingCost);
         setFreeShippingAbove(data.freeShippingAbove);
@@ -102,9 +111,9 @@ export default function CheckoutPage() {
         toast.error(data.error || 'Could not calculate shipping');
       }
     } catch {
-      toast.error('Could not calculate shipping');
+      if (id === shippingReq.current) toast.error('Could not calculate shipping');
     } finally {
-      setShippingLoading(false);
+      if (id === shippingReq.current) setShippingLoading(false);
     }
   }, [discountedSubtotal, totalQty, items, form.state]);
 
@@ -191,6 +200,10 @@ export default function CheckoutPage() {
       size: i.size,
       sleeveType: i.sleeveType || '',
       zipType: i.zipType || '',
+      // Add-ons: the server prices these, so they must be sent or the
+      // server total will be lower than the total shown on this page.
+      pantOption: i.pantOption?.id ? { id: i.pantOption.id } : null,
+      shawlOption: i.shawlOption?.id ? { id: i.shawlOption.id } : null,
       qty: i.qty,
       isCombo: i.isCombo || false,
       comboId: i.comboId
